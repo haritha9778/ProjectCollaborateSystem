@@ -1,0 +1,79 @@
+/* ========================================
+   PROJECT COLLABORATE SYSTEM
+   Global CSS
+======================================== */
+
+/* Reset */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100%;
+}
+
+/* Body */
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  background-color: #f5f7fb;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Root */
+#root {
+  min-height: 100vh;
+}
+
+/* Headings */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin-top: 0;
+}
+
+/* Paragraph */
+p {
+  margin-top: 0;
+}
+
+/* Buttons */
+button {
+  font-family: Arial, Helvetica, sans-serif;
+  cursor: pointer;
+}
+
+/* Inputs */
+input,
+textarea,
+select {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Focus */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* Links */
+a {
+  text-decoration: none;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  body {
+    font-size: 14px;
+  }
+}
