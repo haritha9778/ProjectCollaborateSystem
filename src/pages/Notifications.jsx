@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
+
 import {
   collection,
   getDocs,
   query,
-  orderBy,
+  where,
 } from "firebase/firestore";
 
 function Notifications() {
@@ -16,22 +17,43 @@ function Notifications() {
 
   const loadNotifications = async () => {
     try {
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        setNotifications([]);
+        setLoading(false);
+        return;
+      }
+
+      // Only logged-in user's notifications will be loaded
       const notificationsQuery = query(
         collection(db, "notifications"),
-        orderBy("createdAt", "desc")
+        where("userId", "==", currentUser.uid)
       );
 
       const snapshot = await getDocs(notificationsQuery);
 
-      const notificationList = snapshot.docs.map(
-        (docItem) => ({
-          id: docItem.id,
-          ...docItem.data(),
-        })
-      );
+      const notificationList = snapshot.docs.map((docItem) => ({
+        id: docItem.id,
+        ...docItem.data(),
+      }));
+
+      // Latest notifications first
+      notificationList.sort((a, b) => {
+        const dateA = a.createdAt?.toDate
+          ? a.createdAt.toDate().getTime()
+          : 0;
+
+        const dateB = b.createdAt?.toDate
+          ? b.createdAt.toDate().getTime()
+          : 0;
+
+        return dateB - dateA;
+      });
 
       setNotifications(notificationList);
     } catch (error) {
+      console.error("Notification Error:", error);
       alert(error.message);
     } finally {
       setLoading(false);
@@ -43,17 +65,15 @@ function Notifications() {
   }, []);
 
   const formatDate = (timestamp) => {
-    if (!timestamp) return "Just now";
-
-    if (timestamp.toDate) {
-      return timestamp
-        .toDate()
-        .toLocaleString("en-IN");
+    if (!timestamp) {
+      return "Just now";
     }
 
-    return new Date(timestamp).toLocaleString(
-      "en-IN"
-    );
+    if (timestamp.toDate) {
+      return timestamp.toDate().toLocaleString("en-IN");
+    }
+
+    return new Date(timestamp).toLocaleString("en-IN");
   };
 
   return (
@@ -79,8 +99,7 @@ function Notifications() {
             padding: "30px",
             borderRadius: "15px",
             textAlign: "center",
-            boxShadow:
-              "0 3px 12px rgba(0,0,0,0.08)",
+            boxShadow: "0 3px 12px rgba(0,0,0,0.08)",
             marginBottom: "25px",
           }}
         >
@@ -88,6 +107,7 @@ function Notifications() {
             style={{
               marginTop: 0,
               marginBottom: "10px",
+              color: "#1e3a8a",
             }}
           >
             🔔 Notifications
@@ -99,7 +119,7 @@ function Notifications() {
               marginBottom: 0,
             }}
           >
-            Stay updated with recent project activities.
+            Stay updated with your project activities.
           </p>
         </div>
 
@@ -123,17 +143,25 @@ function Notifications() {
               padding: "50px",
               textAlign: "center",
               borderRadius: "12px",
-              boxShadow:
-                "0 3px 12px rgba(0,0,0,0.08)",
+              boxShadow: "0 3px 12px rgba(0,0,0,0.08)",
             }}
           >
-            <div style={{ fontSize: "50px" }}>
+            <div
+              style={{
+                fontSize: "50px",
+                marginBottom: "15px",
+              }}
+            >
               🔔
             </div>
 
             <h2>No Notifications</h2>
 
-            <p style={{ color: "#666" }}>
+            <p
+              style={{
+                color: "#666",
+              }}
+            >
               New project activities will appear here.
             </p>
           </div>
@@ -147,56 +175,37 @@ function Notifications() {
                 padding: "20px",
                 marginBottom: "15px",
                 borderRadius: "12px",
-                boxShadow:
-                  "0 3px 12px rgba(0,0,0,0.08)",
-                borderLeft:
-                  "5px solid #2563eb",
+                boxShadow: "0 3px 12px rgba(0,0,0,0.08)",
+                borderLeft: "5px solid #2563eb",
               }}
             >
-              <div
+              <h3
                 style={{
-                  display: "flex",
-                  justifyContent:
-                    "space-between",
-                  alignItems: "flex-start",
-                  gap: "15px",
+                  marginTop: 0,
+                  marginBottom: "8px",
+                  color: "#1e3a8a",
                 }}
               >
-                <div>
-                  <h3
-                    style={{
-                      marginTop: 0,
-                      marginBottom: "8px",
-                    }}
-                  >
-                    🔔{" "}
-                    {notification.title ||
-                      "Project Activity"}
-                  </h3>
+                🔔 {notification.title || "Project Activity"}
+              </h3>
 
-                  <p
-                    style={{
-                      margin: "0 0 10px",
-                      color: "#444",
-                      lineHeight: "1.5",
-                    }}
-                  >
-                    {notification.message ||
-                      "New activity detected."}
-                  </p>
+              <p
+                style={{
+                  margin: "0 0 10px",
+                  color: "#444",
+                  lineHeight: "1.5",
+                }}
+              >
+                {notification.message || "New activity detected."}
+              </p>
 
-                  <small
-                    style={{
-                      color: "#777",
-                    }}
-                  >
-                    🕒{" "}
-                    {formatDate(
-                      notification.createdAt
-                    )}
-                  </small>
-                </div>
-              </div>
+              <small
+                style={{
+                  color: "#777",
+                }}
+              >
+                🕒 {formatDate(notification.createdAt)}
+              </small>
             </div>
           ))
         )}
@@ -209,9 +218,7 @@ function Notifications() {
           }}
         >
           <button
-            onClick={() =>
-              navigate("/dashboard")
-            }
+            onClick={() => navigate("/dashboard")}
             style={{
               padding: "12px 20px",
               backgroundColor: "#333",
@@ -219,6 +226,7 @@ function Notifications() {
               border: "none",
               borderRadius: "6px",
               cursor: "pointer",
+              fontSize: "15px",
             }}
           >
             ⬅ Back to Dashboard

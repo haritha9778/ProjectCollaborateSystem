@@ -16,6 +16,7 @@ function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const registerUser = async () => {
     if (!name || !email || !password) {
@@ -50,7 +51,6 @@ function Register() {
       alert("Registration Successful! 🎉");
 
       navigate("/login");
-
     } catch (error) {
       alert(error.message);
     }
@@ -190,21 +190,47 @@ function Register() {
           Password
         </label>
 
-        <input
-          type="password"
-          placeholder="Enter your password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+        <div
           style={{
+            position: "relative",
             width: "100%",
-            padding: "14px",
-            border: "1px solid #d1d5db",
-            borderRadius: "8px",
-            fontSize: "15px",
             marginBottom: "25px",
-            boxSizing: "border-box",
           }}
-        />
+        >
+          <input
+            type={showPassword ? "text" : "password"}
+            placeholder="Enter your password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "14px 48px 14px 14px",
+              border: "1px solid #d1d5db",
+              borderRadius: "8px",
+              fontSize: "15px",
+              boxSizing: "border-box",
+            }}
+          />
+
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            style={{
+              position: "absolute",
+              right: "10px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              border: "none",
+              backgroundColor: "transparent",
+              cursor: "pointer",
+              fontSize: "21px",
+              padding: "4px",
+            }}
+          >
+            {showPassword ? "🙈" : "👁️"}
+          </button>
+        </div>
 
         {/* Register Button */}
         <button

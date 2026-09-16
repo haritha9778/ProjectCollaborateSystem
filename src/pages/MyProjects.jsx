@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
+
 import {
   collection,
   getDocs,
   deleteDoc,
   doc,
+  query,
+  where,
 } from "firebase/firestore";
 
 function MyProjects() {
@@ -15,11 +18,26 @@ function MyProjects() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const [showDeletePopup, setShowDeletePopup] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
   const loadProjects = async () => {
     try {
-      const snapshot = await getDocs(
-        collection(db, "projects")
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        alert("Please login first.");
+        navigate("/login");
+        return;
+      }
+
+      const projectsQuery = query(
+        collection(db, "projects"),
+        where("ownerId", "==", currentUser.uid)
       );
+
+      const snapshot = await getDocs(projectsQuery);
 
       const projectList = snapshot.docs.map((docItem) => ({
         id: docItem.id,
@@ -28,6 +46,7 @@ function MyProjects() {
 
       setProjects(projectList);
     } catch (error) {
+      console.error("Error loading your projects:", error);
       alert(error.message);
     } finally {
       setLoading(false);
@@ -38,28 +57,68 @@ function MyProjects() {
     loadProjects();
   }, []);
 
-  const deleteProject = async (id) => {
-    const confirmDelete = window.confirm(
-      "Are you sure you want to delete this project?"
-    );
+  const openDeletePopup = (id) => {
+    setSelectedProjectId(id);
+    setShowDeletePopup(true);
+  };
 
-    if (!confirmDelete) return;
+  const closeDeletePopup = () => {
+    if (deleting) return;
+
+    setShowDeletePopup(false);
+    setSelectedProjectId(null);
+  };
+
+  const deleteProject = async () => {
+    if (!selectedProjectId) return;
+
+    setDeleting(true);
 
     try {
-      await deleteDoc(doc(db, "projects", id));
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        alert("Please login first.");
+        navigate("/login");
+        return;
+      }
+
+      const selectedProject = projects.find(
+        (project) => project.id === selectedProjectId
+      );
+
+      if (!selectedProject) {
+        alert("Project not found.");
+        return;
+      }
+
+      if (selectedProject.ownerId !== currentUser.uid) {
+        alert("You can delete only your own projects.");
+        return;
+      }
+
+      await deleteDoc(doc(db, "projects", selectedProjectId));
 
       alert("✅ Project Deleted Successfully!");
 
-      loadProjects();
+      setShowDeletePopup(false);
+      setSelectedProjectId(null);
+
+      await loadProjects();
     } catch (error) {
+      console.error("Error deleting project:", error);
       alert(error.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
   const filteredProjects = projects.filter((project) =>
-    project.title
-      ?.toLowerCase()
-      .includes(search.toLowerCase())
+    project.title?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const selectedProject = projects.find(
+    (project) => project.id === selectedProjectId
   );
 
   return (
@@ -78,11 +137,11 @@ function MyProjects() {
           margin: "0 auto",
         }}
       >
-        {/* Header */}
         <h1
           style={{
             textAlign: "center",
             marginBottom: "10px",
+            color: "#123c69",
           }}
         >
           📁 My Projects
@@ -95,10 +154,9 @@ function MyProjects() {
             marginBottom: "30px",
           }}
         >
-          Manage your uploaded projects.
+          Manage projects owned by you.
         </p>
 
-        {/* Search */}
         <div
           style={{
             backgroundColor: "white",
@@ -129,15 +187,11 @@ function MyProjects() {
               color: "#666",
             }}
           >
-            Showing{" "}
-            <strong>{filteredProjects.length}</strong>{" "}
-            of{" "}
-            <strong>{projects.length}</strong>{" "}
-            projects
+            Showing <strong>{filteredProjects.length}</strong> of{" "}
+            <strong>{projects.length}</strong> projects
           </p>
         </div>
 
-        {/* Loading */}
         {loading ? (
           <div
             style={{
@@ -162,7 +216,7 @@ function MyProjects() {
 
             <p>
               {projects.length === 0
-                ? "You have not uploaded any projects yet."
+                ? "You do not own any projects yet."
                 : "Try searching with a different project name."}
             </p>
           </div>
@@ -175,35 +229,36 @@ function MyProjects() {
                 borderRadius: "12px",
                 padding: "25px",
                 marginBottom: "20px",
-                boxShadow:
-                  "0 3px 12px rgba(0,0,0,0.08)",
+                boxShadow: "0 3px 12px rgba(0,0,0,0.08)",
               }}
             >
               <h2
                 style={{
                   marginTop: 0,
-                  color: "#222",
+                  color: "#123c69",
                 }}
               >
-                {project.title}
+                {project.title || "Untitled Project"}
               </h2>
 
               <p>
                 <strong>Description:</strong>{" "}
-                {project.description}
+                {project.description || "Not Added"}
               </p>
 
               <p>
                 <strong>Category:</strong>{" "}
-                {project.category}
+                {project.category || "Not Added"}
               </p>
 
               <p>
-                <strong>Progress:</strong>{" "}
-                {project.progress}%
+                <strong>Progress:</strong> {project.progress || 0}%
               </p>
 
-              {/* Progress Bar */}
+              <p>
+                <strong>Status:</strong> {project.status || "Open"}
+              </p>
+
               <div
                 style={{
                   width: "100%",
@@ -216,7 +271,7 @@ function MyProjects() {
               >
                 <div
                   style={{
-                    width: `${project.progress}%`,
+                    width: `${project.progress || 0}%`,
                     height: "100%",
                     backgroundColor: "#22c55e",
                   }}
@@ -225,11 +280,15 @@ function MyProjects() {
 
               <p>
                 <strong>GitHub:</strong>{" "}
-                {project.github ? (
+                {project.githubLink || project.github ? (
                   <a
-                    href={project.github}
+                    href={project.githubLink || project.github}
                     target="_blank"
                     rel="noreferrer"
+                    style={{
+                      color: "#2563eb",
+                      textDecoration: "none",
+                    }}
                   >
                     Open Repository
                   </a>
@@ -238,7 +297,6 @@ function MyProjects() {
                 )}
               </p>
 
-              {/* Buttons */}
               <div
                 style={{
                   display: "flex",
@@ -248,9 +306,7 @@ function MyProjects() {
                 }}
               >
                 <button
-                  onClick={() =>
-                    navigate(`/edit/${project.id}`)
-                  }
+                  onClick={() => navigate(`/edit/${project.id}`)}
                   style={{
                     padding: "10px 18px",
                     backgroundColor: "#16a34a",
@@ -264,9 +320,7 @@ function MyProjects() {
                 </button>
 
                 <button
-                  onClick={() =>
-                    deleteProject(project.id)
-                  }
+                  onClick={() => openDeletePopup(project.id)}
                   style={{
                     padding: "10px 18px",
                     backgroundColor: "#dc2626",
@@ -283,7 +337,6 @@ function MyProjects() {
           ))
         )}
 
-        {/* Back Button */}
         <div
           style={{
             textAlign: "center",
@@ -305,6 +358,119 @@ function MyProjects() {
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Popup */}
+      {showDeletePopup && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0, 0, 0, 0.55)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: "20px",
+            boxSizing: "border-box",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              width: "100%",
+              maxWidth: "420px",
+              borderRadius: "14px",
+              padding: "30px",
+              textAlign: "center",
+              boxShadow: "0 5px 25px rgba(0,0,0,0.25)",
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "45px",
+                marginBottom: "10px",
+              }}
+            >
+              ⚠️
+            </div>
+
+            <h2
+              style={{
+                color: "#123c69",
+                marginBottom: "12px",
+              }}
+            >
+              Delete Project?
+            </h2>
+
+            <p
+              style={{
+                color: "#555",
+                lineHeight: "1.6",
+              }}
+            >
+              Are you sure you want to delete{" "}
+              <strong>
+                {selectedProject?.title || "this project"}
+              </strong>
+              ?
+            </p>
+
+            <p
+              style={{
+                color: "#dc2626",
+                fontSize: "14px",
+              }}
+            >
+              This action cannot be undone.
+            </p>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+                marginTop: "25px",
+              }}
+            >
+              <button
+                onClick={closeDeletePopup}
+                disabled={deleting}
+                style={{
+                  padding: "11px 22px",
+                  backgroundColor: "#6b7280",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: deleting ? "not-allowed" : "pointer",
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={deleteProject}
+                disabled={deleting}
+                style={{
+                  padding: "11px 22px",
+                  backgroundColor: "#dc2626",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: deleting ? "not-allowed" : "pointer",
+                }}
+              >
+                {deleting ? "Deleting..." : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ function Login() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const loginUser = async () => {
@@ -161,27 +162,53 @@ function Login() {
             Password
           </label>
 
-          <input
-            type="password"
-            placeholder="Enter your password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                loginUser();
-              }
-            }}
+          <div
             style={{
+              position: "relative",
               width: "100%",
-              height: "48px",
-              padding: "0 14px",
-              border: "1px solid #d1d5db",
-              borderRadius: "8px",
-              fontSize: "15px",
-              outline: "none",
-              boxSizing: "border-box",
             }}
-          />
+          >
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  loginUser();
+                }
+              }}
+              style={{
+                width: "100%",
+                height: "48px",
+                padding: "0 48px 0 14px",
+                border: "1px solid #d1d5db",
+                borderRadius: "8px",
+                fontSize: "15px",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              style={{
+                position: "absolute",
+                right: "10px",
+                top: "50%",
+                transform: "translateY(-50%)",
+                border: "none",
+                backgroundColor: "transparent",
+                cursor: "pointer",
+                fontSize: "21px",
+                padding: "4px",
+              }}
+            >
+              {showPassword ? "🙈" : "👁️"}
+            </button>
+          </div>
         </div>
 
         {/* Login Button */}
@@ -191,17 +218,13 @@ function Login() {
           style={{
             width: "100%",
             height: "48px",
-            backgroundColor: loading
-              ? "#9ca3af"
-              : "#2563eb",
+            backgroundColor: loading ? "#9ca3af" : "#2563eb",
             color: "#ffffff",
             border: "none",
             borderRadius: "8px",
             fontSize: "16px",
             fontWeight: "600",
-            cursor: loading
-              ? "not-allowed"
-              : "pointer",
+            cursor: loading ? "not-allowed" : "pointer",
           }}
         >
           {loading ? "⏳ Logging in..." : "🔐 Login"}

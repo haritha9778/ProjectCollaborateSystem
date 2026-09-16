@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { db, auth } from "../firebase";
+
 import {
   collection,
   getDocs,
@@ -14,6 +15,7 @@ function BrowseProjects() {
   const navigate = useNavigate();
 
   const [projects, setProjects] = useState([]);
+  const [requestedProjects, setRequestedProjects] = useState([]);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [loading, setLoading] = useState(true);
@@ -21,64 +23,101 @@ function BrowseProjects() {
 
   useEffect(() => {
     loadProjects();
+    loadRequestedProjects();
   }, []);
 
-  // Load all projects
   const loadProjects = async () => {
     try {
-      const snapshot = await getDocs(
+      const projectSnapshot = await getDocs(
         collection(db, "projects")
       );
 
-      const projectList = snapshot.docs.map((docItem) => ({
+      const projectList = projectSnapshot.docs.map((docItem) => ({
         id: docItem.id,
         ...docItem.data(),
       }));
 
       setProjects(projectList);
     } catch (error) {
-      console.error(error);
+      console.error("Error loading projects:", error);
       alert(error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Send collaboration request
+  const loadRequestedProjects = async () => {
+    try {
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        return;
+      }
+
+      const requestQuery = query(
+        collection(db, "collaboration_requests"),
+        where("requesterId", "==", currentUser.uid)
+      );
+
+      const requestSnapshot = await getDocs(requestQuery);
+
+      const requestedIds = requestSnapshot.docs
+        .filter((docItem) => {
+          const requestData = docItem.data();
+
+          return (
+            requestData.status === "Pending" ||
+            requestData.status === "Accepted"
+          );
+        })
+        .map((docItem) => docItem.data().projectId);
+
+      setRequestedProjects(requestedIds);
+    } catch (error) {
+      console.error("Error loading requested projects:", error);
+    }
+  };
+
   const requestCollaboration = async (project) => {
     try {
       const currentUser = auth.currentUser;
 
-      // Check login
       if (!currentUser) {
         alert("Please login first.");
         navigate("/login");
         return;
       }
 
-      // Check ownerId
       if (!project.ownerId) {
+        alert("This project does not have an owner.");
+        return;
+      }
+
+      if (project.ownerId === currentUser.uid) {
+        alert("You cannot request collaboration for your own project.");
+        return;
+      }
+
+      const isProjectTaken =
+        project.collaboratorId ||
+        project.status === "In Progress" ||
+        project.status === "Accepted" ||
+        project.status === "Completed";
+
+      if (isProjectTaken) {
         alert(
-          "This project does not have an owner. Please choose another project."
-        );
-        console.error(
-          "Missing ownerId for project:",
-          project
+          "This project is already taken. You cannot send another request."
         );
         return;
       }
 
-      // Prevent requesting own project
-      if (project.ownerId === currentUser.uid) {
-        alert(
-          "You cannot request collaboration for your own project."
-        );
+      if (requestedProjects.includes(project.id)) {
+        alert("You have already sent a collaboration request.");
         return;
       }
 
       setRequestingProject(project.id);
 
-      // Check whether request already exists
       const requestQuery = query(
         collection(db, "collaboration_requests"),
         where("projectId", "==", project.id),
@@ -87,15 +126,25 @@ function BrowseProjects() {
 
       const requestSnapshot = await getDocs(requestQuery);
 
-      if (!requestSnapshot.empty) {
-        alert(
-          "You have already sent a collaboration request for this project."
+      const existingRequest = requestSnapshot.docs.find((docItem) => {
+        const requestData = docItem.data();
+
+        return (
+          requestData.status === "Pending" ||
+          requestData.status === "Accepted"
         );
-        setRequestingProject(null);
+      });
+
+      if (existingRequest) {
+        setRequestedProjects((previous) => [
+          ...previous,
+          project.id,
+        ]);
+
+        alert("You have already sent a collaboration request.");
         return;
       }
 
-      // Add collaboration request
       await addDoc(
         collection(db, "collaboration_requests"),
         {
@@ -109,7 +158,6 @@ function BrowseProjects() {
         }
       );
 
-      // Create notification for project owner
       await addDoc(
         collection(db, "notifications"),
         {
@@ -122,186 +170,107 @@ function BrowseProjects() {
         }
       );
 
-      alert(
-        "🤝 Collaboration request sent successfully!"
-      );
+      setRequestedProjects((previous) => [
+        ...previous,
+        project.id,
+      ]);
+
+      alert("🤝 Collaboration request sent successfully!");
     } catch (error) {
-      console.error(error);
-      alert(
-        "Failed to send request: " + error.message
-      );
+      console.error("Error sending request:", error);
+      alert("Failed to send request: " + error.message);
     } finally {
       setRequestingProject(null);
     }
   };
 
-  // Get unique categories
   const categories = [
     "All",
     ...new Set(
       projects
         .map((project) => project.category)
-        .filter(Boolean)
+        .filter((category) => category)
     ),
   ];
 
-  // Filter projects
   const filteredProjects = projects.filter((project) => {
-    const matchesSearch = project.title
-      ?.toLowerCase()
-      .includes(search.toLowerCase());
+    const projectTitle = project.title || "";
+    const projectDescription = project.description || "";
+    const projectCategory = project.category || "";
+
+    const searchText = search.toLowerCase();
+
+    const matchesSearch =
+      projectTitle.toLowerCase().includes(searchText) ||
+      projectDescription.toLowerCase().includes(searchText) ||
+      projectCategory.toLowerCase().includes(searchText);
 
     const matchesCategory =
       categoryFilter === "All" ||
-      project.category === categoryFilter;
+      projectCategory === categoryFilter;
 
     return matchesSearch && matchesCategory;
   });
 
+  if (loading) {
+    return (
+      <div style={styles.loadingContainer}>
+        <h2>Loading Projects...</h2>
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        backgroundColor: "#f5f7fb",
-        padding: "40px 20px",
-        fontFamily: "Arial, sans-serif",
-        boxSizing: "border-box",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: "900px",
-          margin: "0 auto",
-        }}
-      >
-        {/* Header */}
-        <h1
-          style={{
-            textAlign: "center",
-            marginBottom: "10px",
-          }}
-        >
-          📂 Browse Projects
-        </h1>
+    <div style={styles.pageContainer}>
+      <div style={styles.topSection}>
+        <div style={styles.headingSection}>
+          <h1 style={styles.pageTitle}>Browse Projects</h1>
 
-        <p
-          style={{
-            textAlign: "center",
-            color: "#666",
-            marginBottom: "30px",
-          }}
-        >
-          Explore incomplete projects and find projects to collaborate on.
-        </p>
-
-        {/* Search and Filter */}
-        <div
-          style={{
-            backgroundColor: "white",
-            padding: "20px",
-            borderRadius: "12px",
-            marginBottom: "25px",
-            boxShadow: "0 3px 12px rgba(0,0,0,0.08)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              gap: "15px",
-              flexWrap: "wrap",
-            }}
-          >
-            {/* Search */}
-            <input
-              type="text"
-              placeholder="🔍 Search projects by title..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{
-                flex: "1",
-                minWidth: "250px",
-                padding: "12px",
-                border: "1px solid #ccc",
-                borderRadius: "6px",
-                fontSize: "15px",
-                boxSizing: "border-box",
-              }}
-            />
-
-            {/* Category Filter */}
-            <select
-              value={categoryFilter}
-              onChange={(e) =>
-                setCategoryFilter(e.target.value)
-              }
-              style={{
-                padding: "12px",
-                border: "1px solid #ccc",
-                borderRadius: "6px",
-                fontSize: "15px",
-                minWidth: "180px",
-                cursor: "pointer",
-              }}
-            >
-              {categories.map((category) => (
-                <option
-                  key={category}
-                  value={category}
-                >
-                  {category === "All"
-                    ? "📂 All Categories"
-                    : category}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Result Count */}
-          <p
-            style={{
-              marginBottom: 0,
-              marginTop: "15px",
-              color: "#666",
-            }}
-          >
-            Showing{" "}
-            <strong>{filteredProjects.length}</strong>{" "}
-            of{" "}
-            <strong>{projects.length}</strong>{" "}
-            projects
+          <p style={styles.pageDescription}>
+            Find incomplete software projects and collaborate with students.
           </p>
         </div>
 
-        {/* Loading */}
-        {loading ? (
-          <div
-            style={{
-              backgroundColor: "white",
-              padding: "40px",
-              textAlign: "center",
-              borderRadius: "12px",
-            }}
-          >
-            <h3>⏳ Loading Projects...</h3>
-          </div>
-        ) : filteredProjects.length === 0 ? (
-          <div
-            style={{
-              backgroundColor: "white",
-              padding: "40px",
-              textAlign: "center",
-              borderRadius: "12px",
-            }}
-          >
-            <h2>🔍 No Projects Found</h2>
-            <p>
-              Try searching with a different project name
-              or category.
-            </p>
-          </div>
-        ) : (
-          /* Project Cards */
-          filteredProjects.map((project) => {
+        <button
+          style={styles.backButton}
+          onClick={() => navigate("/dashboard")}
+        >
+          Back to Dashboard
+        </button>
+      </div>
+
+      <div style={styles.filterSection}>
+        <input
+          type="text"
+          placeholder="Search projects..."
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          style={styles.searchInput}
+        />
+
+        <select
+          value={categoryFilter}
+          onChange={(event) =>
+            setCategoryFilter(event.target.value)
+          }
+          style={styles.categorySelect}
+        >
+          {categories.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {filteredProjects.length === 0 ? (
+        <div style={styles.emptyContainer}>
+          <h2>No Projects Found</h2>
+          <p>Try searching with a different keyword.</p>
+        </div>
+      ) : (
+        <div style={styles.projectGrid}>
+          {filteredProjects.map((project) => {
             const currentUser = auth.currentUser;
 
             const isOwnProject =
@@ -311,164 +280,425 @@ function BrowseProjects() {
             const isRequesting =
               requestingProject === project.id;
 
+            const isRequestSent =
+              requestedProjects.includes(project.id);
+
+            const isProjectTaken =
+              project.collaboratorId ||
+              project.status === "In Progress" ||
+              project.status === "Accepted" ||
+              project.status === "Completed";
+
+            const getStatusText = () => {
+              if (project.status === "Completed") {
+                return "Completed";
+              }
+
+              if (
+                project.status === "In Progress" ||
+                project.status === "Accepted" ||
+                project.collaboratorId
+              ) {
+                return "In Progress";
+              }
+
+              return "Open";
+            };
+
+            const getStatusBackground = () => {
+              if (project.status === "Completed") {
+                return "#dcfce7";
+              }
+
+              if (
+                project.status === "In Progress" ||
+                project.status === "Accepted" ||
+                project.collaboratorId
+              ) {
+                return "#fef3c7";
+              }
+
+              return "#e8f1ff";
+            };
+
+            const getStatusColor = () => {
+              if (project.status === "Completed") {
+                return "#166534";
+              }
+
+              if (
+                project.status === "In Progress" ||
+                project.status === "Accepted" ||
+                project.collaboratorId
+              ) {
+                return "#92400e";
+              }
+
+              return "#123c69";
+            };
+
             return (
               <div
                 key={project.id}
-                style={{
-                  backgroundColor: "white",
-                  borderRadius: "12px",
-                  padding: "25px",
-                  marginBottom: "20px",
-                  boxShadow:
-                    "0 3px 12px rgba(0,0,0,0.08)",
-                }}
+                style={styles.projectCard}
               >
-                {/* Project Title */}
-                <h2
-                  style={{
-                    marginTop: 0,
-                    color: "#222",
-                  }}
-                >
-                  {project.title}
-                </h2>
+                <div style={styles.cardHeader}>
+                  <h2 style={styles.projectTitle}>
+                    {project.title || "Untitled Project"}
+                  </h2>
 
-                {/* Description */}
-                <p style={{ marginBottom: "10px" }}>
-                  <strong>Description:</strong>{" "}
+                  <span
+                    style={{
+                      ...styles.statusBadge,
+                      backgroundColor: getStatusBackground(),
+                      color: getStatusColor(),
+                    }}
+                  >
+                    {getStatusText()}
+                  </span>
+                </div>
+
+                <p style={styles.projectDescription}>
                   {project.description ||
-                    "No description added"}
+                    "No description available."}
                 </p>
 
-                {/* Category */}
-                <p style={{ marginBottom: "10px" }}>
-                  <strong>Category:</strong>{" "}
-                  {project.category || "Not specified"}
-                </p>
+                <div style={styles.projectDetails}>
+                  <p>
+                    <strong>Category:</strong>{" "}
+                    {project.category || "Not Mentioned"}
+                  </p>
 
-                {/* Progress */}
-                <p style={{ marginBottom: "8px" }}>
-                  <strong>Progress:</strong>{" "}
-                  {project.progress || 0}%
-                </p>
+                  <p>
+                    <strong>Progress:</strong>{" "}
+                    {project.progress || 0}%
+                  </p>
 
-                {/* Progress Bar */}
-                <div
-                  style={{
-                    width: "100%",
-                    height: "10px",
-                    backgroundColor: "#e5e7eb",
-                    borderRadius: "10px",
-                    overflow: "hidden",
-                    marginBottom: "15px",
-                  }}
-                >
+                  <p>
+                    <strong>GitHub:</strong>{" "}
+                    {project.githubLink ? (
+                      <a
+                        href={project.githubLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={styles.githubLink}
+                      >
+                        View Repository
+                      </a>
+                    ) : (
+                      "Not Added"
+                    )}
+                  </p>
+
+                  {isProjectTaken && project.collaboratorId && (
+                    <p style={styles.takenText}>
+                      ✓ This project already has a collaborator.
+                    </p>
+                  )}
+                </div>
+
+                <div style={styles.progressHeader}>
+                  <strong>Project Progress</strong>
+                  <span>
+                    {project.progress || 0}%
+                  </span>
+                </div>
+
+                <div style={styles.progressBackground}>
                   <div
                     style={{
-                      width: `${project.progress || 0}%`,
-                      height: "100%",
-                      backgroundColor: "#22c55e",
+                      ...styles.progressBar,
+                      width: `${Math.min(
+                        Math.max(Number(project.progress) || 0,
+                        0),
+                        100
+                      )}%`,
                     }}
                   ></div>
                 </div>
 
-                {/* GitHub */}
-                <p style={{ marginBottom: "20px" }}>
-                  <strong>GitHub:</strong>{" "}
-
-                  {project.github ? (
-                    <a
-                      href={project.github}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open Repository
-                    </a>
-                  ) : (
-                    "Not Added"
-                  )}
-                </p>
-
-                {/* Collaboration Button */}
-                {!isOwnProject ? (
+                {isOwnProject ? (
                   <button
+                    style={styles.ownProjectButton}
+                    disabled
+                  >
+                    Your Project
+                  </button>
+                ) : isProjectTaken ? (
+                  <button
+                    style={styles.alreadyTakenButton}
+                    disabled
+                  >
+                    ✓ Already Taken
+                  </button>
+                ) : isRequestSent ? (
+                  <button
+                    style={styles.requestSentButton}
+                    disabled
+                  >
+                    ✓ Request Sent
+                  </button>
+                ) : (
+                  <button
+                    style={styles.requestButton}
                     onClick={() =>
                       requestCollaboration(project)
                     }
                     disabled={
-                      isRequesting ||
-                      !project.ownerId
+                      isRequesting || !project.ownerId
                     }
-                    style={{
-                      padding: "11px 20px",
-                      backgroundColor:
-                        isRequesting ||
-                        !project.ownerId
-                          ? "#9ca3af"
-                          : "#2563eb",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor:
-                        isRequesting ||
-                        !project.ownerId
-                          ? "not-allowed"
-                          : "pointer",
-                      fontSize: "15px",
-                      fontWeight: "bold",
-                    }}
                   >
                     {isRequesting
                       ? "⏳ Sending Request..."
                       : !project.ownerId
-                      ? "⚠ Owner Not Available"
+                      ? "Owner Not Available"
                       : "🤝 Request Collaboration"}
-                  </button>
-                ) : (
-                  <button
-                    disabled
-                    style={{
-                      padding: "11px 20px",
-                      backgroundColor: "#e5e7eb",
-                      color: "#666",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "not-allowed",
-                      fontSize: "15px",
-                    }}
-                  >
-                    📌 Your Project
                   </button>
                 )}
               </div>
             );
-          })
-        )}
-
-        {/* Back Button */}
-        <div
-          style={{
-            textAlign: "center",
-            marginTop: "30px",
-          }}
-        >
-          <button
-            onClick={() => navigate("/dashboard")}
-            style={{
-              padding: "12px 20px",
-              backgroundColor: "#333",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-            }}
-          >
-            ⬅ Back to Dashboard
-          </button>
+          })}
         </div>
-      </div>
+      )}
     </div>
   );
 }
+
+const styles = {
+  pageContainer: {
+    minHeight: "100vh",
+    backgroundColor: "#f5f7fb",
+    padding: "35px",
+    fontFamily: "Arial, sans-serif",
+    boxSizing: "border-box",
+  },
+
+  topSection: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "20px",
+    marginBottom: "30px",
+    flexWrap: "wrap",
+  },
+
+  headingSection: {
+    flex: 1,
+    minWidth: "250px",
+  },
+
+  pageTitle: {
+    color: "#123c69",
+    fontSize: "34px",
+    marginBottom: "8px",
+    marginTop: 0,
+  },
+
+  pageDescription: {
+    color: "#555",
+    fontSize: "16px",
+    margin: 0,
+    lineHeight: "1.5",
+  },
+
+  backButton: {
+    backgroundColor: "#123c69",
+    color: "white",
+    border: "none",
+    padding: "12px 20px",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "14px",
+  },
+
+  filterSection: {
+    display: "flex",
+    gap: "15px",
+    marginBottom: "30px",
+    flexWrap: "wrap",
+  },
+
+  searchInput: {
+    flex: 1,
+    minWidth: "230px",
+    padding: "14px",
+    border: "1px solid #ccc",
+    borderRadius: "8px",
+    fontSize: "15px",
+    outline: "none",
+    boxSizing: "border-box",
+  },
+
+  categorySelect: {
+    minWidth: "200px",
+    padding: "14px",
+    border: "1px solid #ccc",
+    borderRadius: "8px",
+    fontSize: "15px",
+    backgroundColor: "white",
+    boxSizing: "border-box",
+  },
+
+  projectGrid: {
+    display: "grid",
+    gridTemplateColumns:
+      "repeat(auto-fit, minmax(280px, 1fr))",
+    gap: "25px",
+  },
+
+  projectCard: {
+    backgroundColor: "white",
+    borderRadius: "12px",
+    padding: "25px",
+    boxShadow: "0 4px 15px rgba(0, 0, 0, 0.08)",
+    border: "1px solid #e1e5eb",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "12px",
+    marginBottom: "15px",
+    flexWrap: "wrap",
+  },
+
+  projectTitle: {
+    color: "#123c69",
+    fontSize: "22px",
+    margin: 0,
+    wordBreak: "break-word",
+    flex: 1,
+    minWidth: 0,
+  },
+
+  statusBadge: {
+    padding: "6px 10px",
+    borderRadius: "20px",
+    fontSize: "12px",
+    fontWeight: "bold",
+    whiteSpace: "nowrap",
+  },
+
+  projectDescription: {
+    color: "#555",
+    lineHeight: "1.6",
+    minHeight: "50px",
+    marginBottom: "18px",
+    wordBreak: "break-word",
+  },
+
+  projectDetails: {
+    color: "#333",
+    fontSize: "14px",
+    lineHeight: "1.8",
+    overflowWrap: "anywhere",
+  },
+
+  takenText: {
+    color: "#15803d",
+    fontWeight: "bold",
+  },
+
+  progressHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "10px",
+    color: "#123c69",
+    fontSize: "14px",
+    marginTop: "18px",
+    marginBottom: "8px",
+  },
+
+  progressBackground: {
+    height: "9px",
+    backgroundColor: "#e5e7eb",
+    borderRadius: "10px",
+    overflow: "hidden",
+    marginBottom: "20px",
+  },
+
+  progressBar: {
+    height: "100%",
+    backgroundColor: "#2563eb",
+    borderRadius: "10px",
+    transition: "width 0.3s ease",
+  },
+
+  githubLink: {
+    color: "#2563eb",
+    textDecoration: "none",
+    wordBreak: "break-word",
+  },
+
+  requestButton: {
+    width: "100%",
+    padding: "13px",
+    backgroundColor: "#123c69",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "15px",
+    cursor: "pointer",
+    boxSizing: "border-box",
+  },
+
+  requestSentButton: {
+    width: "100%",
+    padding: "13px",
+    backgroundColor: "#198754",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "15px",
+    cursor: "not-allowed",
+    boxSizing: "border-box",
+  },
+
+  alreadyTakenButton: {
+    width: "100%",
+    padding: "13px",
+    backgroundColor: "#64748b",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "15px",
+    cursor: "not-allowed",
+    boxSizing: "border-box",
+  },
+
+  ownProjectButton: {
+    width: "100%",
+    padding: "13px",
+    backgroundColor: "#999",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "15px",
+    cursor: "not-allowed",
+    boxSizing: "border-box",
+  },
+
+  emptyContainer: {
+    backgroundColor: "white",
+    padding: "50px",
+    borderRadius: "12px",
+    textAlign: "center",
+    color: "#555",
+    boxSizing: "border-box",
+  },
+
+  loadingContainer: {
+    minHeight: "100vh",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f5f7fb",
+    color: "#123c69",
+  },
+};
 
 export default BrowseProjects;

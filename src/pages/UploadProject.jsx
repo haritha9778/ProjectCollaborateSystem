@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { db, auth } from "../firebase";
+
 import {
   collection,
   addDoc,
   serverTimestamp,
+  getDocs,
+  query,
+  where,
 } from "firebase/firestore";
 
 function UploadProject() {
@@ -33,8 +37,9 @@ function UploadProject() {
       return;
     }
 
-    // Check whether user is logged in
-    if (!auth.currentUser) {
+    const currentUser = auth.currentUser;
+
+    if (!currentUser) {
       alert("Please login first.");
       navigate("/login");
       return;
@@ -43,30 +48,69 @@ function UploadProject() {
     setLoading(true);
 
     try {
-      await addDoc(collection(db, "projects"), {
-        title: title.trim(),
-        description: description.trim(),
-        category: category,
-        progress: Number(progress),
-        github: github.trim(),
+      // Save project
+      const projectReference = await addDoc(
+        collection(db, "projects"),
+        {
+          title: title.trim(),
+          description: description.trim(),
+          category: category,
+          progress: Number(progress),
+          githubLink: github.trim(),
 
-        // Important for Collaboration
-        ownerId: auth.currentUser.uid,
+          ownerId: currentUser.uid,
 
-        // Initial project status
-        status: Number(progress) === 100
-          ? "Completed"
-          : "Open",
+          status:
+            Number(progress) === 100
+              ? "Completed"
+              : "Open",
 
+          collaboratorId: null,
+
+          createdAt: serverTimestamp(),
+        }
+      );
+
+      // Notification for project owner
+      await addDoc(collection(db, "notifications"), {
+        userId: currentUser.uid,
+        title: "Project Uploaded Successfully",
+        message: `Your project "${title.trim()}" was uploaded successfully.`,
+        projectId: projectReference.id,
+        isRead: false,
         createdAt: serverTimestamp(),
       });
+
+      // Find Admin users
+      const adminQuery = query(
+        collection(db, "users"),
+        where("role", "==", "Admin")
+      );
+
+      const adminSnapshot = await getDocs(adminQuery);
+
+      // Notification only for Admin users
+      const adminNotifications = adminSnapshot.docs.map(
+        async (adminDocument) => {
+          return addDoc(collection(db, "notifications"), {
+            userId: adminDocument.id,
+            title: "New Project Uploaded",
+            message: `${currentUser.email} uploaded a new project "${title.trim()}".`,
+            projectId: projectReference.id,
+            isRead: false,
+            createdAt: serverTimestamp(),
+          });
+        }
+      );
+
+      await Promise.all(adminNotifications);
 
       alert("✅ Project Uploaded Successfully!");
 
       navigate("/myprojects");
     } catch (error) {
-      console.error(error);
-      alert(error.message);
+      console.error("Error uploading project:", error);
+      alert("Project upload failed: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -98,6 +142,7 @@ function UploadProject() {
             textAlign: "center",
             marginTop: 0,
             marginBottom: "10px",
+            color: "#123c69",
           }}
         >
           📤 Upload Project
@@ -110,11 +155,9 @@ function UploadProject() {
             marginBottom: "30px",
           }}
         >
-          Share your incomplete or completed project
-          with other students.
+          Share your incomplete or completed project with other students.
         </p>
 
-        {/* Project Title */}
         <label>
           <strong>Project Title *</strong>
         </label>
@@ -123,7 +166,7 @@ function UploadProject() {
           type="text"
           placeholder="Enter project title"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(event) => setTitle(event.target.value)}
           style={{
             width: "100%",
             padding: "12px",
@@ -136,7 +179,6 @@ function UploadProject() {
           }}
         />
 
-        {/* Description */}
         <label>
           <strong>Project Description *</strong>
         </label>
@@ -145,7 +187,7 @@ function UploadProject() {
           rows="5"
           placeholder="Describe your project..."
           value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={(event) => setDescription(event.target.value)}
           style={{
             width: "100%",
             padding: "12px",
@@ -159,14 +201,13 @@ function UploadProject() {
           }}
         />
 
-        {/* Category */}
         <label>
           <strong>Category *</strong>
         </label>
 
         <select
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
+          onChange={(event) => setCategory(event.target.value)}
           style={{
             width: "100%",
             padding: "12px",
@@ -180,33 +221,14 @@ function UploadProject() {
           }}
         >
           <option value="">Select Project Category</option>
-
-          <option value="Web Development">
-            Web Development
-          </option>
-
-          <option value="Mobile App">
-            Mobile App
-          </option>
-
-          <option value="Java">
-            Java
-          </option>
-
-          <option value="Python">
-            Python
-          </option>
-
-          <option value="Data Science">
-            Data Science
-          </option>
-
-          <option value="Other">
-            Other
-          </option>
+          <option value="Web Development">Web Development</option>
+          <option value="Mobile App">Mobile App</option>
+          <option value="Java">Java</option>
+          <option value="Python">Python</option>
+          <option value="Data Science">Data Science</option>
+          <option value="Other">Other</option>
         </select>
 
-        {/* Progress */}
         <label>
           <strong>Project Progress (%) *</strong>
         </label>
@@ -217,7 +239,7 @@ function UploadProject() {
           max="100"
           placeholder="Example: 50"
           value={progress}
-          onChange={(e) => setProgress(e.target.value)}
+          onChange={(event) => setProgress(event.target.value)}
           style={{
             width: "100%",
             padding: "12px",
@@ -230,7 +252,6 @@ function UploadProject() {
           }}
         />
 
-        {/* GitHub */}
         <label>
           <strong>GitHub Link</strong>
         </label>
@@ -239,7 +260,7 @@ function UploadProject() {
           type="url"
           placeholder="https://github.com/username/project"
           value={github}
-          onChange={(e) => setGithub(e.target.value)}
+          onChange={(event) => setGithub(event.target.value)}
           style={{
             width: "100%",
             padding: "12px",
@@ -252,7 +273,6 @@ function UploadProject() {
           }}
         />
 
-        {/* Buttons */}
         <div
           style={{
             display: "flex",
@@ -266,21 +286,15 @@ function UploadProject() {
             disabled={loading}
             style={{
               padding: "12px 25px",
-              backgroundColor: loading
-                ? "#999"
-                : "#2563eb",
+              backgroundColor: loading ? "#999" : "#2563eb",
               color: "white",
               border: "none",
               borderRadius: "6px",
-              cursor: loading
-                ? "not-allowed"
-                : "pointer",
+              cursor: loading ? "not-allowed" : "pointer",
               fontSize: "15px",
             }}
           >
-            {loading
-              ? "⏳ Uploading..."
-              : "📤 Upload Project"}
+            {loading ? "⏳ Uploading..." : "📤 Upload Project"}
           </button>
 
           <button

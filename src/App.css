@@ -23,9 +23,16 @@ body {
   font-family: Arial, Helvetica, sans-serif;
   background-color: #f5f7fb;
   color: #111827;
+  overflow-x: hidden;
 }
 
-/* Remove default heading margins */
+/* Images */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Headings */
 h1,
 h2,
 h3,
@@ -33,12 +40,20 @@ h4,
 h5,
 h6 {
   margin-top: 0;
+  word-wrap: break-word;
+}
+
+/* Text */
+p {
+  word-wrap: break-word;
 }
 
 /* Buttons */
 button {
   font-family: Arial, Helvetica, sans-serif;
+  cursor: pointer;
   transition: 0.2s ease;
+  max-width: 100%;
 }
 
 button:hover {
@@ -47,13 +62,26 @@ button:hover {
 
 button:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Inputs */
 input,
 textarea,
 select {
+  width: 100%;
+  max-width: 100%;
   font-family: Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 100px;
 }
 
 input:focus,
@@ -67,11 +95,209 @@ select:focus {
 /* Links */
 a {
   text-decoration: none;
+  color: inherit;
 }
 
-/* Responsive */
+/* Tables */
+table {
+  width: 100%;
+  max-width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  word-break: break-word;
+}
+
+/* Cards */
+.card,
+.dashboard-card,
+.project-card {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Common Containers */
+.container,
+.page-container,
+.dashboard-container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Prevent long text overflow */
+.long-text,
+.email,
+.github-link {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ========================================
+   Tablet Responsive
+======================================== */
+
+@media (max-width: 900px) {
+  .container,
+  .page-container,
+  .dashboard-container {
+    width: 100%;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  h1 {
+    font-size: 28px;
+  }
+
+  h2 {
+    font-size: 24px;
+  }
+
+  h3 {
+    font-size: 20px;
+  }
+}
+
+/* ========================================
+   Mobile Responsive
+======================================== */
+
 @media (max-width: 600px) {
   body {
     font-size: 14px;
+  }
+
+  .container,
+  .page-container,
+  .dashboard-container {
+    width: 100%;
+    padding-left: 15px;
+    padding-right: 15px;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  h2 {
+    font-size: 21px;
+  }
+
+  h3 {
+    font-size: 18px;
+  }
+
+  button {
+    min-height: 42px;
+    font-size: 14px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  th,
+  td {
+    padding: 8px;
+    font-size: 14px;
+  }
+
+  /* Mobile Header */
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .header button {
+    width: 100%;
+  }
+
+  /* Mobile Grid */
+  .card-grid,
+  .dashboard-grid,
+  .project-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Mobile Cards */
+  .card,
+  .dashboard-card,
+  .project-card {
+    width: 100%;
+    padding: 18px;
+  }
+
+  /* Mobile Buttons */
+  .button,
+  .primary-button,
+  .secondary-button,
+  .logout-button {
+    width: 100%;
+  }
+
+  /* Mobile Forms */
+  form {
+    width: 100%;
+  }
+
+  /* Mobile Modal */
+  .modal,
+  .modal-content {
+    width: calc(100% - 30px);
+    max-width: 100%;
+    margin: 15px auto;
+  }
+
+  /* Mobile Navigation */
+  nav {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+/* ========================================
+   Small Mobile
+======================================== */
+
+@media (max-width: 400px) {
+  .container,
+  .page-container,
+  .dashboard-container {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  h1 {
+    font-size: 21px;
+  }
+
+  h2 {
+    font-size: 19px;
+  }
+
+  h3 {
+    font-size: 17px;
+  }
+
+  .card,
+  .dashboard-card,
+  .project-card {
+    padding: 15px;
+  }
+
+  button {
+    font-size: 13px;
   }
 }

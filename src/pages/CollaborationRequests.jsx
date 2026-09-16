@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
+
 import {
   collection,
   getDocs,
@@ -10,6 +11,7 @@ import {
   doc,
   addDoc,
   serverTimestamp,
+  getDoc,
 } from "firebase/firestore";
 
 function CollaborationRequests() {
@@ -24,18 +26,21 @@ function CollaborationRequests() {
   }, []);
 
   const loadRequests = async () => {
-    if (!auth.currentUser) {
-      navigate("/login");
-      return;
-    }
-
     try {
-      const q = query(
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        navigate("/login");
+        return;
+      }
+
+      // Only requests for projects currently owned by this user
+      const requestsQuery = query(
         collection(db, "collaboration_requests"),
-        where("ownerId", "==", auth.currentUser.uid)
+        where("ownerId", "==", currentUser.uid)
       );
 
-      const snapshot = await getDocs(q);
+      const snapshot = await getDocs(requestsQuery);
 
       const requestList = snapshot.docs.map((item) => ({
         id: item.id,
@@ -44,18 +49,123 @@ function CollaborationRequests() {
 
       setRequests(requestList);
     } catch (error) {
-      console.error(error);
+      console.error("Error loading collaboration requests:", error);
       alert(error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRequest = async (request, newStatus) => {
-    setProcessingId(request.id);
+  const sendNotification = async (
+    userId,
+    title,
+    message,
+    projectId
+  ) => {
+    if (!userId) {
+      return;
+    }
 
+    await addDoc(collection(db, "notifications"), {
+      userId: userId,
+      title: title,
+      message: message,
+      projectId: projectId,
+      isRead: false,
+      createdAt: serverTimestamp(),
+    });
+  };
+
+  const notifyAdmins = async (title, message, projectId) => {
     try {
-      // Update request status
+      const adminQuery = query(
+        collection(db, "users"),
+        where("role", "==", "Admin")
+      );
+
+      const adminSnapshot = await getDocs(adminQuery);
+
+      const adminNotifications = adminSnapshot.docs.map(
+        async (adminDocument) => {
+          await sendNotification(
+            adminDocument.id,
+            title,
+            message,
+            projectId
+          );
+        }
+      );
+
+      await Promise.all(adminNotifications);
+    } catch (error) {
+      console.error("Admin notification error:", error);
+    }
+  };
+
+  const handleRequest = async (request, newStatus) => {
+    try {
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        alert("Please login first.");
+        navigate("/login");
+        return;
+      }
+
+      setProcessingId(request.id);
+
+      // Get project details
+      const projectReference = doc(
+        db,
+        "projects",
+        request.projectId
+      );
+
+      const projectSnapshot = await getDoc(projectReference);
+
+      if (!projectSnapshot.exists()) {
+        alert("Project not found.");
+        return;
+      }
+
+      const projectData = projectSnapshot.data();
+
+      // Check actual current project owner
+      if (projectData.ownerId !== currentUser.uid) {
+        alert(
+          "You are not allowed to accept or reject this request."
+        );
+        return;
+      }
+
+      // Check request owner
+      if (request.ownerId !== currentUser.uid) {
+        alert(
+          "You are not the owner of this collaboration request."
+        );
+        return;
+      }
+
+      // Only pending requests can be processed
+      if (request.status !== "Pending") {
+        alert("This request has already been processed.");
+        return;
+      }
+
+      // Check whether project is already taken
+      if (
+        newStatus === "Accepted" &&
+        (
+          projectData.collaboratorId ||
+          projectData.status === "In Progress" ||
+          projectData.status === "Completed"
+        )
+      ) {
+        alert("This project already has a collaborator.");
+        return;
+      }
+
+      // Update collaboration request status
       await updateDoc(
         doc(db, "collaboration_requests", request.id),
         {
@@ -63,32 +173,70 @@ function CollaborationRequests() {
         }
       );
 
-      // Send notification to requester
-      await addDoc(collection(db, "notifications"), {
-        userId: request.requesterId,
-        title:
-          newStatus === "Accepted"
-            ? "Collaboration Request Accepted"
-            : "Collaboration Request Rejected",
-        message:
-          newStatus === "Accepted"
-            ? `Your collaboration request for "${request.projectTitle}" has been accepted.`
-            : `Your collaboration request for "${request.projectTitle}" has been rejected.`,
-        projectId: request.projectId,
-        isRead: false,
-        createdAt: serverTimestamp(),
-      });
+      // IMPORTANT:
+      // When Vino accepts Kamali's request,
+      // Kamali becomes the new project owner.
+      if (newStatus === "Accepted") {
+        await updateDoc(projectReference, {
+          ownerId: request.requesterId,
+          collaboratorId: null,
+          status: "In Progress",
+        });
+      }
+
+      const notificationTitle =
+        newStatus === "Accepted"
+          ? "Collaboration Request Accepted"
+          : "Collaboration Request Rejected";
+
+      const notificationMessageForRequester =
+        newStatus === "Accepted"
+          ? `Your collaboration request for "${request.projectTitle}" has been accepted. You are now the owner of this project.`
+          : `Your collaboration request for "${request.projectTitle}" has been rejected.`;
+
+      const notificationMessageForOwner =
+        newStatus === "Accepted"
+          ? `You accepted the collaboration request for "${request.projectTitle}". Project ownership has been transferred to the requester.`
+          : `You rejected the collaboration request for "${request.projectTitle}".`;
+
+      const notificationMessageForAdmin =
+        newStatus === "Accepted"
+          ? `The collaboration request for "${request.projectTitle}" was accepted and project ownership was transferred to the requester.`
+          : `The collaboration request for "${request.projectTitle}" was rejected.`;
+
+      // Notification to requester
+      await sendNotification(
+        request.requesterId,
+        notificationTitle,
+        notificationMessageForRequester,
+        request.projectId
+      );
+
+      // Notification to old owner
+      await sendNotification(
+        currentUser.uid,
+        notificationTitle,
+        notificationMessageForOwner,
+        request.projectId
+      );
+
+      // Notification to admins
+      await notifyAdmins(
+        notificationTitle,
+        notificationMessageForAdmin,
+        request.projectId
+      );
 
       alert(
         newStatus === "Accepted"
-          ? "✅ Collaboration request accepted!"
+          ? "✅ Request accepted. Project ownership transferred successfully!"
           : "❌ Collaboration request rejected!"
       );
 
-      loadRequests();
+      await loadRequests();
     } catch (error) {
-      console.error(error);
-      alert(error.message);
+      console.error("Error processing request:", error);
+      alert("Error: " + error.message);
     } finally {
       setProcessingId(null);
     }
@@ -114,6 +262,7 @@ function CollaborationRequests() {
           style={{
             textAlign: "center",
             marginBottom: "10px",
+            color: "#123c69",
           }}
         >
           🤝 Collaboration Requests
@@ -126,7 +275,7 @@ function CollaborationRequests() {
             marginBottom: "30px",
           }}
         >
-          Manage requests received for your projects.
+          Only current project owners can accept or reject requests.
         </p>
 
         {loading ? (
@@ -151,8 +300,9 @@ function CollaborationRequests() {
             }}
           >
             <h2>📭 No Collaboration Requests</h2>
+
             <p>
-              You don't have any collaboration requests yet.
+              You don't have any collaboration requests for your projects.
             </p>
           </div>
         ) : (
@@ -170,15 +320,15 @@ function CollaborationRequests() {
               <h2
                 style={{
                   marginTop: 0,
-                  color: "#222",
+                  color: "#123c69",
                 }}
               >
-                {request.projectTitle}
+                {request.projectTitle || "Untitled Project"}
               </h2>
 
               <p>
                 <strong>Requester:</strong>{" "}
-                {request.requesterEmail}
+                {request.requesterEmail || "Not Available"}
               </p>
 
               <p>
@@ -194,7 +344,7 @@ function CollaborationRequests() {
                         : "#d97706",
                   }}
                 >
-                  {request.status}
+                  {request.status || "Pending"}
                 </span>
               </p>
 
@@ -227,7 +377,9 @@ function CollaborationRequests() {
                           : "pointer",
                     }}
                   >
-                    ✅ Accept
+                    {processingId === request.id
+                      ? "Processing..."
+                      : "✅ Accept"}
                   </button>
 
                   <button
@@ -250,7 +402,9 @@ function CollaborationRequests() {
                           : "pointer",
                     }}
                   >
-                    ❌ Reject
+                    {processingId === request.id
+                      ? "Processing..."
+                      : "❌ Reject"}
                   </button>
                 </div>
               )}
